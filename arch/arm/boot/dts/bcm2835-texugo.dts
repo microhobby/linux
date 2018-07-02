@@ -29,6 +29,14 @@
 		};
 	};
 
+	clap-sensor {
+		compatible = "texugo,clap-sensor";
+		pinctrl-names = "default";
+		pinctrl-0 = <&clap_sensor_pinctrl>;
+		interrupt-parent = <&gpio>;
+		interrupts = <25 IRQ_TYPE_EDGE_BOTH>;
+	};
+
 	wifi_pwrseq: wifi-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		pinctrl-names = "default";
@@ -109,6 +117,11 @@
 		brcm,pins = <41>;
 		brcm,function = <BCM2835_FSEL_GPIO_OUT>;
 	};
+
+	clap_sensor_pinctrl: clap-pin {
+		pins = "gpio25";
+		function = "gpio_in";
+	};
 };
 
 &hdmi {
@@ -150,5 +163,6 @@
 &i2c1 {
 	fuelgauge@36 {
 		compatible = "maxim,max17040";
+		reg = <0x36>;
 	};
 };
