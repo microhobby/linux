@@ -102,24 +102,35 @@ static void max17040_reset(struct i2c_client *client)
 	max17040_write_reg(client, MAX17040_CMD, 0x0054);
 }
 
-static void max17040_get_vcell(struct i2c_client *client)
+static bool max17040_get_vcell(struct i2c_client *client)
 {
 	struct max17040_chip *chip = i2c_get_clientdata(client);
 	u16 vcell;
 
 	vcell = max17040_read_reg(client, MAX17040_VCELL);
 
-	chip->vcell = vcell;
+	if (vcell != chip->vcell) {
+		chip->vcell = vcell;
+		return true;
+	}
+
+	return false;
 }
 
-static void max17040_get_soc(struct i2c_client *client)
+static bool max17040_get_soc(struct i2c_client *client)
 {
 	struct max17040_chip *chip = i2c_get_clientdata(client);
 	u16 soc;
 
 	soc = max17040_read_reg(client, MAX17040_SOC);
+	soc = (soc >> 8);
 
-	chip->soc = (soc >> 8);
+	if (soc != chip->soc) {
+		chip->soc = soc;
+		return true;
+	}
+
+	return false;
 }
 
 static void max17040_get_version(struct i2c_client *client)
@@ -131,49 +142,73 @@ static void max17040_get_version(struct i2c_client *client)
 	dev_info(&client->dev, "MAX17040 Fuel-Gauge Ver 0x%x\n", version);
 }
 
-static void max17040_get_online(struct i2c_client *client)
+static bool max17040_get_online(struct i2c_client *client)
 {
 	struct max17040_chip *chip = i2c_get_clientdata(client);
+	int online_tmp;
 
 	if (chip->pdata && chip->pdata->battery_online)
-		chip->online = chip->pdata->battery_online();
+		online_tmp = chip->pdata->battery_online();
 	else
-		chip->online = 1;
+		online_tmp = 1;
+
+	if (online_tmp != chip->online) {
+		chip->online = online_tmp;
+		return true;
+	}
+
+	return false;
 }
 
-static void max17040_get_status(struct i2c_client *client)
+static bool max17040_get_status(struct i2c_client *client)
 {
 	struct max17040_chip *chip = i2c_get_clientdata(client);
+	int status_tmp;
 
 	if (!chip->pdata || !chip->pdata->charger_online
 			|| !chip->pdata->charger_enable) {
-		chip->status = POWER_SUPPLY_STATUS_UNKNOWN;
-		return;
+		status_tmp = POWER_SUPPLY_STATUS_UNKNOWN;
+		return false;
 	}
 
 	if (chip->pdata->charger_online()) {
 		if (chip->pdata->charger_enable())
-			chip->status = POWER_SUPPLY_STATUS_CHARGING;
+			status_tmp = POWER_SUPPLY_STATUS_CHARGING;
 		else
-			chip->status = POWER_SUPPLY_STATUS_NOT_CHARGING;
+			status_tmp = POWER_SUPPLY_STATUS_NOT_CHARGING;
 	} else {
-		chip->status = POWER_SUPPLY_STATUS_DISCHARGING;
+		status_tmp = POWER_SUPPLY_STATUS_DISCHARGING;
 	}
 
 	if (chip->soc > MAX17040_BATTERY_FULL)
-		chip->status = POWER_SUPPLY_STATUS_FULL;
+		status_tmp = POWER_SUPPLY_STATUS_FULL;
+
+	if (status_tmp != chip->status) {
+		chip->status = status_tmp;
+		return true;
+	}
+
+	return false;
 }
 
 static void max17040_work(struct work_struct *work)
 {
 	struct max17040_chip *chip;
+	bool changed = false;
 
 	chip = container_of(work, struct max17040_chip, work.work);
 
-	max17040_get_vcell(chip->client);
-	max17040_get_soc(chip->client);
-	max17040_get_online(chip->client);
-	max17040_get_status(chip->client);
+	if (max17040_get_vcell(chip->client))
+		changed = true;
+	if (max17040_get_soc(chip->client))
+		changed = true;
+	if (max17040_get_online(chip->client))
+		changed = true;
+	if (max17040_get_status(chip->client))
+		changed = true;
+
+	if (changed)
+		power_supply_changed(chip->battery);
 
 	queue_delayed_work(system_power_efficient_wq, &chip->work,
 			   MAX17040_DELAY);
