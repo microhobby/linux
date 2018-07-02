@@ -1,0 +1,4 @@
+config INPUT_CLAP_SENSOR
+	bool "Geric Clap sound sensor"
+	help
+	  Say Y here if you want to uevents from clap sensor interrupts.
