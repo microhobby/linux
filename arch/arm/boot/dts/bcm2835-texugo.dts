@@ -16,7 +16,7 @@
 
 / {
 	compatible = "raspberrypi,model-zero-w", "brcm,bcm2835";
-	model = "Raspberry Pi Zero W";
+	model = "Texugo Board v01";
 
 	chosen {
 		/* 8250 auxiliary UART instead of pl011 */
