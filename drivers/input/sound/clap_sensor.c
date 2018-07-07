@@ -1,22 +1,62 @@
+/*
+ * Clap Sensor driver
+ * This is for that simple sensors devices where we have a mic and the Output
+ * from mic is input to opamp to made the logic trigger.
+ *
+ * Copyright (C) 2018 www.castello.eng.br
+ * 2018-07-06: Matheus Castello <matheus@castello.eng.br>
+ *             initial version
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2 as
+ *  published by the Free Software Foundation.
+ */
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/input.h>
+#include <linux/gpio.h>			/* legacy gpio */
+#include <linux/gpio/consumer.h>	/* gpiolib */
 #include <linux/interrupt.h>
 #include <linux/regmap.h>
-#include <linux/of.h>
+#include <linux/of.h>			/* get gpio from device tree */
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 
 struct clap_sensor {
 	struct input_dev *idev;
 	struct device *dev;
+#ifdef CONFIG_CLAP_GPIO_LEGACY
+	u16 gpio;
+#endif
+#ifdef CONFIG_CLAP_GPIO_LEGACY_OF
+	const struct of_device_id *match;
+	struct device_node *node;
+#endif
+#ifdef CONFIG_CLAP_GPIODESC
+	gpio_descs *gpio;
+#endif
 };
 
 static irqreturn_t clap_sensor_irq(int irq, void *_clap)
 {
 	struct clap_sensor *clap = _clap;
 	int val;
+
+	/* change led state */
+#ifdef CONFIG_CLAP_GPIO_LEGACY
+	val = gpio_get_value(clap->gpio);
+	val = val ? 0 : 1;
+	gpio_set_value(23, val);
+#endif
+
+#ifdef CONFIG_CLAP_GPIODESC
+	val = gpiod_get_value(clap->gpio);
+	val = val ? 0 : 1;
+	gpiod_set_value(clap->gpio, val);
+#endif
 
 	kobject_uevent(&clap->dev->kobj, KOBJ_CHANGE);
 	dev_info(clap->dev, "CLAPED\n");
@@ -27,7 +67,7 @@ static irqreturn_t clap_sensor_irq(int irq, void *_clap)
 static int clap_sensor_probe(struct platform_device *pdev)
 {
 	struct clap_sensor *clap;
-	int irq;
+	int irq = platform_get_irq(pdev, 0);
 	int err;
 
 	/* memory allocation */
@@ -51,10 +91,34 @@ static int clap_sensor_probe(struct platform_device *pdev)
 	clap->idev->dev.parent = clap->dev;
 	input_set_capability(clap->idev, EV_SND, SND_CLICK);
 
+#ifdef CONFIG_CLAP_GPIO_LEGACY
+	clap->gpio = 23;
+
+#ifdef CONFIG_CLAP_GPIO_LEGACY_OF
+	of_property_read_u16(clap->dev->of_node,
+		"clap-trigger-led", &clap->gpio);
+#endif
+
+	err = gpio_request_one(clap->gpio, GPIOF_DIR_OUT, "clap-trigger");
+	if (err) {
+		dev_err(&pdev->dev, "Error trying request gpio %d\n", err);
+		return err;
+	}
+#endif
+
+#ifdef CONFIG_CLAP_GPIODESC
+	err = gpiod_get(clap->dev, "trigger", GPIOD_OUT_LOW); /* GPIOD_ASIS */
+	if (IS_ERR(err)) {
+		err = -ENOENT;
+		dev_err(&pdev->dev, "Error trying request gpio %d\n", err);
+		return err;
+	}
+	clap->gpio = err;
+#endif
+
 	dev_info(clap->dev, "initializing CLAP\n");
 
 	/* interrupt */
-	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		dev_err(&pdev->dev, "platform IRQ request failed: %d\n", irq);
 		return irq;
@@ -81,6 +145,22 @@ static int clap_sensor_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int clap_sensor_remove (struct platform_device *pdev)
+{
+	struct clap_sensor *clap = platform_get_drvdata(pdev);
+	int irq = platform_get_irq(pdev, 0);
+
+#ifdef CONFIG_CLAP_GPIODESC
+	gpiod_put(clap->gpio);
+#endif
+	/* clear device */
+	input_unregister_device(clap->idev);
+	free_irq(irq, clap);
+	kfree(clap);
+
+	return 0;
+}
+
 #ifdef CONFIG_OF
 static const struct of_device_id clap_sensor_dt_match_table[] = {
 	{ .compatible = "texugo,clap-sensor" },
@@ -91,6 +171,7 @@ MODULE_DEVICE_TABLE(of, clap_sensor_dt_match_table);
 
 static struct platform_driver clap_sensor_driver = {
 	.probe = clap_sensor_probe,
+	.remove = clap_sensor_remove,
 	.driver = {
 		.name = "clap-sensor",
 		.of_match_table = of_match_ptr(clap_sensor_dt_match_table),
