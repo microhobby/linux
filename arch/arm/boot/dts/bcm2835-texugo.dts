@@ -43,6 +43,7 @@
 		interrupt-parent = <&gpio>;
 		interrupts = <17 IRQ_TYPE_EDGE_BOTH>;
 		clap-trigger-led = <24>;
+		debounce = <100>;
 
 		led-trigger {
 			label = "trigger";

@@ -28,8 +28,10 @@
 struct clap_sensor {
 	struct input_dev *idev;
 	struct device *dev;
+	volatile int debounce;
+	bool debounced;
 #ifdef CONFIG_CLAP_GPIO_LEGACY
-	u16 gpio;
+	int gpio;
 #endif
 #ifdef CONFIG_CLAP_GPIO_LEGACY_OF
 	const struct of_device_id *match;
@@ -45,21 +47,37 @@ static irqreturn_t clap_sensor_irq(int irq, void *_clap)
 	struct clap_sensor *clap = _clap;
 	int val;
 
-	/* change led state */
-#ifdef CONFIG_CLAP_GPIO_LEGACY
-	val = gpio_get_value(clap->gpio);
-	val = val ? 0 : 1;
-	gpio_set_value(23, val);
+	/* check debounce */
+	if (clap->debounced) {
+		/* change led state */
+#ifdef CONFIG_CLAP_GPIO_LEGACY_OF
+		val = gpio_get_value(clap->gpio);
+		val = val ? 0 : 1;
+		gpio_set_value(clap->gpio, val);
 #endif
 
 #ifdef CONFIG_CLAP_GPIODESC
-	val = gpiod_get_value(clap->gpio);
-	val = val ? 0 : 1;
-	gpiod_set_value(clap->gpio, val);
+		val = gpiod_get_value(clap->gpio);
+		val = val ? 0 : 1;
+		gpiod_set_value(clap->gpio, val);
 #endif
+		dev_info(clap->dev, "CLAPED\n");
+		/* take time to debounce */
+		clap->debounced = false;
+	}
 
-	kobject_uevent(&clap->dev->kobj, KOBJ_CHANGE);
-	dev_info(clap->dev, "CLAPED\n");
+	return IRQ_WAKE_THREAD;
+}
+
+static irqreturn_t clap_sensor_thread_irq(int irq, void *_clap)
+{
+	struct clap_sensor *clap = _clap;
+
+	if  (!clap->debounced) {
+		kobject_uevent(&clap->dev->kobj, KOBJ_CHANGE);
+		msleep(clap->debounce);
+		clap->debounced = true;
+	}
 
 	return IRQ_HANDLED;
 }
@@ -91,14 +109,19 @@ static int clap_sensor_probe(struct platform_device *pdev)
 	clap->idev->dev.parent = clap->dev;
 	input_set_capability(clap->idev, EV_SND, SND_CLICK);
 
+	/* gpio for led trigger initializations */
 #ifdef CONFIG_CLAP_GPIO_LEGACY
 	clap->gpio = 23;
 
 #ifdef CONFIG_CLAP_GPIO_LEGACY_OF
-	of_property_read_u16(clap->dev->of_node,
+	err = of_property_read_u32(clap->dev->of_node,
 		"clap-trigger-led", &clap->gpio);
+	if (err) {
+		dev_err(&pdev->dev, "Error trying request gpio %d\n", err);
+		return err;
+	} else
+		dev_info(&pdev->dev, "We get the GPIO %d\n", clap->gpio);
 #endif
-
 	err = gpio_request_one(clap->gpio, GPIOF_DIR_OUT, "clap-trigger");
 	if (err) {
 		dev_err(&pdev->dev, "Error trying request gpio %d\n", err);
@@ -116,6 +139,16 @@ static int clap_sensor_probe(struct platform_device *pdev)
 	clap->gpio = err;
 #endif
 
+	/* get debounce time from device tree */
+	err = of_property_read_u32(clap->dev->of_node,
+		"debounce", &clap->debounce);
+	if (err) {
+		dev_err(&pdev->dev, "Error trying request debounce %d\n", err);
+		return err;
+	} else
+		dev_info(&pdev->dev, "We get the debounce %d\n", clap->debounce);
+	clap->debounced = true;
+
 	dev_info(clap->dev, "initializing CLAP\n");
 
 	/* interrupt */
@@ -124,8 +157,8 @@ static int clap_sensor_probe(struct platform_device *pdev)
 		return irq;
 	}
 
-	err = devm_request_threaded_irq(&pdev->dev, irq, NULL,
-		clap_sensor_irq, IRQF_ONESHOT, "clap-sensor", clap);
+	err = devm_request_threaded_irq(&pdev->dev, irq, clap_sensor_irq,
+		clap_sensor_thread_irq, IRQF_ONESHOT, "clap-sensor", clap);
 	if (err < 0) {
 		dev_err(&pdev->dev, "IRQ request failed: %d\n", err);
 		return err;
