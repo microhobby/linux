@@ -44,11 +44,9 @@
 		interrupts = <17 IRQ_TYPE_EDGE_BOTH>;
 		clap-trigger-led = <24>;
 		debounce = <100>;
-
-		led-trigger {
-			label = "trigger";
-			trigger-gpios = <&gpio 23 GPIO_ACTIVE_LOW>;
-		};
+		/* for use with new gpio API */
+		label = "trigger";
+		trigger-gpios = <&gpio 24 GPIO_ACTIVE_LOW>;
 	};
 
 	wifi_pwrseq: wifi-pwrseq {

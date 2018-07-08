@@ -28,7 +28,7 @@
 struct clap_sensor {
 	struct input_dev *idev;
 	struct device *dev;
-	volatile int debounce;
+	int debounce;
 	bool debounced;
 #ifdef CONFIG_CLAP_GPIO_LEGACY
 	int gpio;
@@ -38,7 +38,7 @@ struct clap_sensor {
 	struct device_node *node;
 #endif
 #ifdef CONFIG_CLAP_GPIODESC
-	gpio_descs *gpio;
+	struct gpio_desc *gpio;
 #endif
 };
 
@@ -130,13 +130,12 @@ static int clap_sensor_probe(struct platform_device *pdev)
 #endif
 
 #ifdef CONFIG_CLAP_GPIODESC
-	err = gpiod_get(clap->dev, "trigger", GPIOD_OUT_LOW); /* GPIOD_ASIS */
-	if (IS_ERR(err)) {
+	clap->gpio = gpiod_get(clap->dev, "trigger", GPIOD_OUT_LOW); /* GPIOD_ASIS */
+	if (IS_ERR(clap->gpio)) {
 		err = -ENOENT;
 		dev_err(&pdev->dev, "Error trying request gpio %d\n", err);
 		return err;
 	}
-	clap->gpio = err;
 #endif
 
 	/* get debounce time from device tree */
@@ -213,5 +212,5 @@ static struct platform_driver clap_sensor_driver = {
 module_platform_driver(clap_sensor_driver);
 
 MODULE_AUTHOR("Matheus Castello <matheus@castello.eng.br>");
-MODULE_DESCRIPTION("Driver for generic Clap Sensor from an op amp output");
+MODULE_DESCRIPTION("Driver for generic Clap Sensor from an OpAmp output");
 MODULE_LICENSE("GPL v2");

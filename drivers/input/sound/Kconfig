@@ -15,7 +15,7 @@ config CLAP_GPIO_LEGACY_OF
 	help
 		Say yes to test it
 
-config CLAP_GPIOLIB
-	bool "Use new GPIOLIB API"
+config CLAP_GPIODESC
+	bool "Use new GPIO API"
 	help
 		Say yes to test it
